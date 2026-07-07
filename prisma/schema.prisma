@@ -1,0 +1,94 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  displayName  String
+  createdAt    DateTime @default(now())
+
+  ownedWorkspaces       Workspace[]       @relation("WorkspaceOwner")
+  workspaceMemberships  WorkspaceMember[]
+  refreshTokens         RefreshToken[]
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Workspace {
+  id         String   @id
+  name       String
+  ownerId    String
+  inviteCode String   @unique @default(uuid())
+  createdAt  DateTime @default(now())
+
+  owner   User              @relation("WorkspaceOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  members WorkspaceMember[]
+  tickets Ticket[]
+}
+
+model WorkspaceMember {
+  id          String   @id @default(uuid())
+  workspaceId String
+  userId      String
+  role        Role     @default(MEMBER)
+  joinedAt    DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+}
+
+enum Role {
+  OWNER
+  MEMBER
+}
+
+model Ticket {
+  id               String   @id
+  workspaceId      String
+  title            String
+  service          String
+  subCategory      String   @default("")
+  status           String   @default("Open")
+  severity         String   @default("Medium")
+  dateReported     DateTime @default(now())
+  description      String   @db.Text
+  observed         String   @db.Text
+  stepsToReproduce String   @db.Text
+  expectedOutcome  String   @db.Text
+  actualOutcome    String   @db.Text
+  rootCause        String   @db.Text
+  environment      String   @db.Text
+
+  workspace   Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  attachments Attachment[]
+}
+
+model Attachment {
+  id         String   @id @default(uuid())
+  ticketId   String
+  name       String
+  mimeType   String
+  size       Int
+  storageKey String
+  url        String
+  createdAt  DateTime @default(now())
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+}
