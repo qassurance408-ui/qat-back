@@ -1,9 +1,9 @@
-FROM node:20-alpine AS builder
+FROM node:20-bookworm-slim AS builder
 
 WORKDIR /app
 
 # Install build dependencies for bcrypt
-RUN apk add --no-cache python3 make g++
+RUN apt-get update -y && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json* ./
 RUN npm ci
@@ -17,11 +17,12 @@ RUN npm run build
 
 # ─────────────────────────────────────────────
 
-FROM node:20-alpine AS runner
+FROM node:20-bullseye-slim AS runner
 
 WORKDIR /app
 
-RUN apk add --no-cache openssl
+# Bullseye (Debian 11) ships OpenSSL 1.1.x — what AletCloud's cluster expects
+RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json* ./
 RUN npm ci --omit=dev
@@ -29,6 +30,11 @@ RUN npm ci --omit=dev
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/dist ./dist
 COPY prisma/ ./prisma/
+
+# Also copy the Prisma CLI so migrations work at startup
+COPY --from=builder /app/node_modules/.bin/prisma ./node_modules/.bin/prisma
+COPY --from=builder /app/node_modules/prisma ./node_modules/prisma
+COPY --from=builder /app/node_modules/@prisma/engines ./node_modules/@prisma/engines
 
 EXPOSE 3000
 
