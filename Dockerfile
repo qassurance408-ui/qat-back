@@ -36,7 +36,10 @@ COPY --from=builder /app/node_modules/.bin/prisma ./node_modules/.bin/prisma
 COPY --from=builder /app/node_modules/prisma ./node_modules/prisma
 COPY --from=builder /app/node_modules/@prisma/engines ./node_modules/@prisma/engines
 
+COPY start.sh ./
+RUN chmod +x start.sh
+
 EXPOSE 3000
 
 # Run migrations on startup, then start the server
-CMD ["sh", "-c", "npx prisma migrate deploy && node dist/index.js"]
+CMD ["./start.sh"]

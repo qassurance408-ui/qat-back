@@ -15,7 +15,15 @@ export const config = {
   nodeEnv: process.env.NODE_ENV || 'development',
 
   database: {
-    url: requireEnv('DATABASE_URL'),
+    host: requireEnv('DB_HOST'),
+    port: parseInt(process.env.DB_PORT || '3306', 10),
+    user: requireEnv('DB_USER'),
+    password: requireEnv('DB_PASSWORD'),
+    name: requireEnv('DB_NAME'),
+    ssl: process.env.DB_SSL === 'true',
+    get url(): string {
+      return `mysql://${this.user}:${encodeURIComponent(this.password)}@${this.host}:${this.port}/${this.name}`;
+    },
   },
 
   jwt: {
@@ -35,4 +43,4 @@ export const config = {
   cors: {
     origin: process.env.CORS_ORIGIN || 'http://localhost:4200',
   },
-} as const;
+};
