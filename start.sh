@@ -8,6 +8,6 @@ if [ -n "$DB_HOST" ] && [ -n "$DB_USER" ] && [ -n "$DB_PASSWORD" ] && [ -n "$DB_
   export DATABASE_URL="mysql://${DB_USER}:$(printf '%s' "$DB_PASSWORD" | sed 's/@/%40/g;s/:/%3A/g;s/\//%2F/g;s/?/%3F/g;s/#/%23/g;s/ /%20/g')@${DB_HOST}:${DB_PORT}/${DB_NAME}"
 fi
 
-# Run migrations, then start the server
-npx prisma migrate deploy
+# Sync database schema (creates tables if they don't exist)
+npx prisma db push --accept-data-loss --skip-generate
 exec node dist/index.js
