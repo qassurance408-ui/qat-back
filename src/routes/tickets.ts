@@ -2,9 +2,23 @@ import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { prisma } from '../db';
 import { requireWorkspaceMember } from '../middleware/workspace-member';
-import { s3Client } from '../storage';
+import { s3Client, getPresignedUrl } from '../storage';
 import { config } from '../config';
 import { DeleteObjectCommand } from '@aws-sdk/client-s3';
+
+async function mapAttachments(
+  attachments: { id: string; name: string; mimeType: string; size: number; storageKey: string }[]
+) {
+  return Promise.all(
+    attachments.map(async (a) => ({
+      id: a.id,
+      name: a.name,
+      mimeType: a.mimeType,
+      size: a.size,
+      url: await getPresignedUrl(a.storageKey),
+    }))
+  );
+}
 
 const router = Router({ mergeParams: true });
 
@@ -99,14 +113,21 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
           name: true,
           mimeType: true,
           size: true,
-          url: true,
+          storageKey: true,
         },
       },
     },
     orderBy: { dateReported: 'desc' },
   });
 
-  res.status(200).json(tickets);
+  const ticketsWithUrls = await Promise.all(
+    tickets.map(async (t) => ({
+      ...t,
+      attachments: await mapAttachments(t.attachments),
+    }))
+  );
+
+  res.status(200).json(ticketsWithUrls);
 });
 
 // ---------------------------------------------------------------------------
@@ -125,7 +146,7 @@ router.get('/:ticketId', async (req: Request, res: Response): Promise<void> => {
           name: true,
           mimeType: true,
           size: true,
-          url: true,
+          storageKey: true,
         },
       },
     },
@@ -141,7 +162,10 @@ router.get('/:ticketId', async (req: Request, res: Response): Promise<void> => {
     return;
   }
 
-  res.status(200).json(ticket);
+  res.status(200).json({
+    ...ticket,
+    attachments: await mapAttachments(ticket.attachments),
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -205,13 +229,16 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
           name: true,
           mimeType: true,
           size: true,
-          url: true,
+          storageKey: true,
         },
       },
     },
   });
 
-  res.status(201).json(ticket);
+  res.status(201).json({
+    ...ticket,
+    attachments: await mapAttachments(ticket.attachments),
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -274,13 +301,16 @@ router.put('/:ticketId', async (req: Request, res: Response): Promise<void> => {
           name: true,
           mimeType: true,
           size: true,
-          url: true,
+          storageKey: true,
         },
       },
     },
   });
 
-  res.status(200).json(ticket);
+  res.status(200).json({
+    ...ticket,
+    attachments: await mapAttachments(ticket.attachments),
+  });
 });
 
 // ---------------------------------------------------------------------------

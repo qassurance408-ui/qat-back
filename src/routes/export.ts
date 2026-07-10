@@ -72,7 +72,6 @@ router.get(
             name: true,
             mimeType: true,
             size: true,
-            url: true,
             storageKey: true,
           },
         },
@@ -90,7 +89,6 @@ router.get(
               name: a.name,
               mimeType: a.mimeType,
               size: a.size,
-              url: a.url,
               data: dataUri,
             };
           })

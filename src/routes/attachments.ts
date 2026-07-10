@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import { PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { prisma } from '../db';
-import { s3Client } from '../storage';
+import { s3Client, getPresignedUrl } from '../storage';
 import { config } from '../config';
 import { requireWorkspaceMember } from '../middleware/workspace-member';
 
@@ -81,7 +81,6 @@ router.post(
     for (const file of files) {
       const timestamp = Date.now();
       const storageKey = `attachments/${workspaceId}/${ticketId}/${timestamp}-${file.originalname}`;
-      const url = `${config.s3.endpoint}/${config.s3.bucket}/${storageKey}`;
 
       // Upload to S3
       try {
@@ -112,16 +111,17 @@ router.post(
           mimeType: file.mimetype,
           size: file.size,
           storageKey,
-          url,
         },
       });
+
+      const presignedUrl = await getPresignedUrl(attachment.storageKey);
 
       createdAttachments.push({
         id: attachment.id,
         name: attachment.name,
         mimeType: attachment.mimeType,
         size: attachment.size,
-        url: attachment.url,
+        url: presignedUrl,
       });
     }
 

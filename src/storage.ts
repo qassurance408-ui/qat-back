@@ -1,4 +1,5 @@
-import { S3Client } from '@aws-sdk/client-s3';
+import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { config } from './config';
 
 export const s3Client = new S3Client({
@@ -10,3 +11,11 @@ export const s3Client = new S3Client({
   },
   forcePathStyle: true, // Required for S3-compatible storage
 });
+
+export async function getPresignedUrl(storageKey: string): Promise<string> {
+  return getSignedUrl(
+    s3Client,
+    new GetObjectCommand({ Bucket: config.s3.bucket, Key: storageKey }),
+    { expiresIn: 3600 }
+  );
+}
