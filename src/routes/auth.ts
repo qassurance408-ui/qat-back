@@ -1,7 +1,11 @@
 import { Router, Request, Response } from 'express';
 import bcrypt from 'bcrypt';
+import multer from 'multer';
 import { z } from 'zod';
+import { PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { prisma } from '../db';
+import { s3Client } from '../storage';
+import { config } from '../config';
 import {
   signAccessToken,
   createRefreshToken,
@@ -11,6 +15,18 @@ import {
 import { requireAuth } from '../middleware/auth';
 
 const router = Router();
+
+const avatarUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only image files are allowed'));
+    }
+  },
+});
 
 // ---------------------------------------------------------------------------
 // Validation schemas
@@ -81,6 +97,7 @@ router.post('/register', async (req: Request, res: Response): Promise<void> => {
       id: user.id,
       email: user.email,
       displayName: user.displayName,
+      avatarUrl: user.avatarUrl ?? null,
     },
     accessToken,
   });
@@ -142,6 +159,7 @@ router.post('/login', async (req: Request, res: Response): Promise<void> => {
       id: user.id,
       email: user.email,
       displayName: user.displayName,
+      avatarUrl: user.avatarUrl ?? null,
     },
     accessToken,
   });
@@ -227,7 +245,7 @@ router.post('/logout', async (req: Request, res: Response): Promise<void> => {
 router.get('/me', requireAuth, async (req: Request, res: Response): Promise<void> => {
   const user = await prisma.user.findUnique({
     where: { id: req.user!.userId },
-    select: { id: true, email: true, displayName: true, createdAt: true },
+    select: { id: true, email: true, displayName: true, avatarUrl: true, createdAt: true },
   });
 
   if (!user) {
@@ -241,6 +259,131 @@ router.get('/me', requireAuth, async (req: Request, res: Response): Promise<void
   }
 
   res.status(200).json(user);
+});
+
+// ---------------------------------------------------------------------------
+// PUT /api/auth/me — update display name
+// ---------------------------------------------------------------------------
+
+router.put('/me', requireAuth, async (req: Request, res: Response): Promise<void> => {
+  const parsed = z.object({
+    displayName: z.string().min(1).max(50),
+  }).safeParse(req.body);
+
+  if (!parsed.success) {
+    res.status(400).json({
+      error: { code: 'VALIDATION_ERROR', message: 'Invalid display name', details: parsed.error.flatten().fieldErrors },
+    });
+    return;
+  }
+
+  const user = await prisma.user.update({
+    where: { id: req.user!.userId },
+    data: { displayName: parsed.data.displayName },
+    select: { id: true, email: true, displayName: true, avatarUrl: true },
+  });
+
+  res.status(200).json(user);
+});
+
+// ---------------------------------------------------------------------------
+// PUT /api/auth/password — change password
+// ---------------------------------------------------------------------------
+
+router.put('/password', requireAuth, async (req: Request, res: Response): Promise<void> => {
+  const parsed = z.object({
+    oldPassword: z.string().min(1),
+    newPassword: z.string().min(8, 'Password must be at least 8 characters'),
+  }).safeParse(req.body);
+
+  if (!parsed.success) {
+    res.status(400).json({
+      error: { code: 'VALIDATION_ERROR', message: 'Validation failed', details: parsed.error.flatten().fieldErrors },
+    });
+    return;
+  }
+
+  const { oldPassword, newPassword } = parsed.data;
+
+  const user = await prisma.user.findUnique({ where: { id: req.user!.userId } });
+  if (!user) {
+    res.status(404).json({ error: { code: 'NOT_FOUND', message: 'User not found' } });
+    return;
+  }
+
+  const valid = await bcrypt.compare(oldPassword, user.passwordHash);
+  if (!valid) {
+    res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'Current password is incorrect' } });
+    return;
+  }
+
+  const passwordHash = await bcrypt.hash(newPassword, 12);
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { passwordHash },
+  });
+
+  res.status(204).send();
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/auth/avatar — upload avatar
+// ---------------------------------------------------------------------------
+
+router.post('/avatar', requireAuth, avatarUpload.single('avatar'), async (req: Request, res: Response): Promise<void> => {
+  if (!req.file) {
+    res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'No file provided' } });
+    return;
+  }
+
+  const ext = req.file.originalname.split('.').pop() || 'png';
+  const key = `avatars/${req.user!.userId}.${ext}`;
+
+  await s3Client.send(new PutObjectCommand({
+    Bucket: config.s3.bucket,
+    Key: key,
+    Body: req.file.buffer,
+    ContentType: req.file.mimetype,
+  }));
+
+  const avatarUrl = `s3://${config.s3.bucket}/${key}`;
+
+  await prisma.user.update({
+    where: { id: req.user!.userId },
+    data: { avatarUrl },
+  });
+
+  res.status(200).json({ avatarUrl });
+});
+
+// ---------------------------------------------------------------------------
+// DELETE /api/auth/avatar — remove avatar
+// ---------------------------------------------------------------------------
+
+router.delete('/avatar', requireAuth, async (req: Request, res: Response): Promise<void> => {
+  const user = await prisma.user.findUnique({ where: { id: req.user!.userId } });
+  if (!user || !user.avatarUrl) {
+    res.status(404).json({ error: { code: 'NOT_FOUND', message: 'No avatar to remove' } });
+    return;
+  }
+
+  // Extract key from s3:// URL
+  const key = user.avatarUrl.replace(`s3://${config.s3.bucket}/`, '');
+  try {
+    await s3Client.send(new DeleteObjectCommand({
+      Bucket: config.s3.bucket,
+      Key: key,
+    }));
+  } catch {
+    // Ignore S3 delete errors — the file may not exist
+  }
+
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { avatarUrl: null },
+  });
+
+  res.status(204).send();
 });
 
 export default router;
