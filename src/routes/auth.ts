@@ -4,7 +4,7 @@ import multer from 'multer';
 import { z } from 'zod';
 import { PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { prisma } from '../db';
-import { s3Client } from '../storage';
+import { s3Client, getPresignedUrl } from '../storage';
 import { config } from '../config';
 import {
   signAccessToken,
@@ -15,6 +15,12 @@ import {
 import { requireAuth } from '../middleware/auth';
 
 const router = Router();
+
+/** Convert a stored S3 key to a presigned URL, or null if absent. */
+async function presignAvatarUrl(avatarUrl: string | null): Promise<string | null> {
+  if (!avatarUrl) return null;
+  return getPresignedUrl(avatarUrl);
+}
 
 const avatarUpload = multer({
   storage: multer.memoryStorage(),
@@ -97,7 +103,7 @@ router.post('/register', async (req: Request, res: Response): Promise<void> => {
       id: user.id,
       email: user.email,
       displayName: user.displayName,
-      avatarUrl: user.avatarUrl ?? null,
+      avatarUrl: await presignAvatarUrl(user.avatarUrl),
     },
     accessToken,
   });
@@ -159,7 +165,7 @@ router.post('/login', async (req: Request, res: Response): Promise<void> => {
       id: user.id,
       email: user.email,
       displayName: user.displayName,
-      avatarUrl: user.avatarUrl ?? null,
+      avatarUrl: await presignAvatarUrl(user.avatarUrl),
     },
     accessToken,
   });
@@ -258,7 +264,7 @@ router.get('/me', requireAuth, async (req: Request, res: Response): Promise<void
     return;
   }
 
-  res.status(200).json(user);
+  res.status(200).json({ ...user, avatarUrl: await presignAvatarUrl(user.avatarUrl) });
 });
 
 // ---------------------------------------------------------------------------
@@ -283,7 +289,7 @@ router.put('/me', requireAuth, async (req: Request, res: Response): Promise<void
     select: { id: true, email: true, displayName: true, avatarUrl: true },
   });
 
-  res.status(200).json(user);
+  res.status(200).json({ ...user, avatarUrl: await presignAvatarUrl(user.avatarUrl) });
 });
 
 // ---------------------------------------------------------------------------
@@ -346,14 +352,12 @@ router.post('/avatar', requireAuth, avatarUpload.single('avatar'), async (req: R
     ContentType: req.file.mimetype,
   }));
 
-  const avatarUrl = `s3://${config.s3.bucket}/${key}`;
-
   await prisma.user.update({
     where: { id: req.user!.userId },
-    data: { avatarUrl },
+    data: { avatarUrl: key },
   });
 
-  res.status(200).json({ avatarUrl });
+  res.status(200).json({ avatarUrl: await getPresignedUrl(key) });
 });
 
 // ---------------------------------------------------------------------------
@@ -367,8 +371,7 @@ router.delete('/avatar', requireAuth, async (req: Request, res: Response): Promi
     return;
   }
 
-  // Extract key from s3:// URL
-  const key = user.avatarUrl.replace(`s3://${config.s3.bucket}/`, '');
+  const key = user.avatarUrl;
   try {
     await s3Client.send(new DeleteObjectCommand({
       Bucket: config.s3.bucket,
