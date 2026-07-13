@@ -38,6 +38,7 @@ const VALID_SERVICES = [
   'Object Storage',
   'Databases',
   'Domains',
+  'AI/MCP',
   'Other/Platform',
 ] as const;
 
